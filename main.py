@@ -2,49 +2,8 @@ import copy
 import heapq
 import time
 import itertools
+import functools
 
-level = """
-######
-#@   #
-###  #
-## $ #
-# .# #
-######
-"""
-level="""
-##############
-#..  #     ###
-#..  #       #
-#..  # ####  #
-#..      ##  #
-#..  # #    ##
-######$##    #
-### $      @ #
-###    #     #
-##############
-"""
-level = """
-##############
-#..  #     ###
-#..  #       #
-#..  # ####  #
-#..$     ##@ #
-#..  # #    ##
-###### ##    #
-###        $ #
-###    #     #
-##############
-"""
-level="""
-#################
-#########     ###
-##########$   ###
-######### $ # ###
-#...   ##$      #
-##       @      #
-#.  $  ##########
-#################
-"""
 level="""
 #########
 #       #
@@ -60,8 +19,7 @@ def get_level(level):
 
 class Position():
     solved_positions = set()
-    position_viewed = 0
-    position_filtered = 0
+    positions_explored = 0
     position_2box_filtered = 0
     time_start = time.time()
 
@@ -79,7 +37,6 @@ class Position():
             self._build_1box_dead_positions()
             self._build_2box_dead_positions()
 
-
     def _add_perfect_goals(self):
         if len(self._boxes) == 1:
             return
@@ -91,7 +48,6 @@ class Position():
                           ((0, -1), (1, 0))]:
                 c = 0
                 for wall_dy, wall_dx in walls:
-                    #or (nrow + wall_dy, ncol + wall_dx) == self._last_moved_box:
                     if self._board[nrow + wall_dy][ncol + wall_dx] == 1 or ((nrow + wall_dy, ncol + wall_dx) in self._perfect_goals and (nrow + wall_dy, ncol + wall_dx) in self._boxes):
                         c += 1
                 if c == 2:
@@ -119,7 +75,7 @@ class Position():
                     position = Position.copy(self)
                     position._player = ((nrow, ncol))
                     position.set_boxes({(nrow, ncol)})
-                    is_solved, _ = Position.solve(position, debug=False)
+                    is_solved, _ = Position.solve(position)
                     if not is_solved:
                         self._one_box_deads.add((nrow, ncol))
 
@@ -150,7 +106,7 @@ class Position():
                                 result = players_viewed[position._normalized_player]
                             else:
                                 if Position.is_solvable(position):
-                                    result, _ = Position.solve(position, debug=False, check_reduced=False)
+                                    result, _ = Position.solve(position, check_reduced=False)
                                     if not result:
                                         all_positions_are_solvable = False
                                 players_viewed[position._normalized_player] = result
@@ -161,52 +117,7 @@ class Position():
                 Position.solved_positions.add(position)
 
     def _update(self):
-        #previous_player_board = self._player_board if hasattr(self, '_player_board') else None
-        #previous_player_board_set = set()
-
         self._player_board, self._normalized_player = Position.get_player_reachable_squares(self)
-
-        # self._ignore_position_check = False
-        # if previous_player_board is not None:
-        #     for nrow in range(len(previous_player_board)):
-        #         for ncol in range(len(previous_player_board[0])):
-        #             if previous_player_board[nrow][ncol] == 1:
-        #                 previous_player_board_set.add((nrow, ncol))
-        #     current_player_board_set = set()
-        #     for nrow in range(len(self._player_board)):
-        #         for ncol in range(len(self._player_board[0])):
-        #             if self._player_board[nrow][ncol] == 1:
-        #                 current_player_board_set.add((nrow, ncol))
-        #     if current_player_board_set == previous_player_board_set.union({ self._player }):
-        #         self._ignore_position_check = True
-        #self._blocked_regions = Position._get_blocked_regions(self)
-
-    @staticmethod
-    def _get_blocked_regions(position):
-        regions = []
-        def start_region(nrow, ncol):
-            region = set()
-            queue = [(nrow, ncol)]
-            seen = set()
-            while queue:
-                py, px = queue.pop()
-                if (py, px) in seen:
-                    continue
-                seen.add((py, px))
-                region.add((py, px))
-                for move in Position.get_player_moves(position, (py, px)):
-                    queue.append(move)
-            return region
-
-        for nrow in range(len(position._player_board)):
-            for ncol in range(len(position._player_board[0])):
-                if position._player_board[nrow][ncol] == 0:
-                    if position._board[nrow][ncol] == 0:
-                        if (nrow, ncol) not in position._boxes:
-                            if not any((nrow, ncol) in region for region in regions):
-                                region = start_region(nrow, ncol)
-                                regions.append(region)
-        return regions
 
     def __hash__(self):
         return hash(frozenset(self._boxes).union(self._normalized_player))
@@ -268,45 +179,24 @@ class Position():
 
     @staticmethod
     def get_pushable_boxes(position):
-        #not_matched_boxes = position._boxes.keys() - position._goals
-        #matched_boxes = set(position._boxes.keys()).intersection(position._goals)
-        #boxes = list(sorted(not_matched_boxes, key=lambda x: position._boxes[x])) + list(matched_boxes)
         boxes = position._boxes.keys() - position._perfect_goals
-        moves = []
         for by, bx in boxes:
             if position._player_board[by][bx + 1]:
                 if (by, bx - 1) not in position._boxes:
                     if position._board[by][bx - 1] == 0:
                         yield (by, bx, 'l')
-                        # if (by, bx - 1) in position._perfect_goals:
-                        #     moves.insert(0, (by, bx, 'l'))
-                        # else:
-                        #     moves.append((by, bx, 'l'))
             if position._player_board[by + 1][bx]:
                 if (by - 1, bx) not in position._boxes:
                     if position._board[by - 1][bx] == 0:
                         yield (by, bx, 'u')
-                        # if (by - 1, bx) in position._perfect_goals:
-                        #     moves.insert(0, (by, bx, 'u'))
-                        # else:
-                        #     moves.append((by, bx, 'u'))
             if position._player_board[by - 1][bx]:
                 if (by + 1, bx) not in position._boxes:
                     if position._board[by + 1][bx] == 0:
                         yield (by, bx, 'd')
-                        # if (by + 1, bx) in position._perfect_goals:
-                        #     moves.insert(0, (by, bx, 'd'))
-                        # else:
-                        #     moves.append((by, bx, 'd'))
             if position._player_board[by][bx - 1]:
                 if (by, bx + 1) not in position._boxes:
                     if position._board[by][bx + 1] == 0:
                         yield (by, bx, 'r')
-        #                 if (by, bx + 1) in position._perfect_goals:
-        #                     moves.insert(0, (by, bx, 'r'))
-        #                 else:
-        #                     moves.append((by, bx, 'r'))
-        # return moves
 
     def set_boxes(self, boxes):
         self._boxes = {}
@@ -324,7 +214,6 @@ class Position():
             self._add_perfect_goals()
         self._update()
         self._move_history.append((box_y, box_x, direction))
-        #print(len(self._move_history))
 
     @staticmethod
     def copy(position):
@@ -341,13 +230,12 @@ class Position():
         res._two_box_deads = position._two_box_deads if hasattr(position, '_two_box_deads') else dict()
         res._perfect_goals = copy.copy(position._perfect_goals)
         res._move_history = copy.copy(position._move_history)
-        #res._blocked_regions = position._blocked_regions
         return res
 
     @staticmethod
     def is_solved(position):
         return len(position._boxes.keys() - position._goals) == 0
-        return len(set(position._boxes.keys()).intersection(position._goals)) >= min(8, len(position._boxes))
+        #return len(set(position._boxes.keys()).intersection(position._goals)) >= min(8, len(position._boxes))
 
     @staticmethod
     def is_reduced(position):
@@ -406,9 +294,6 @@ class Position():
 
     @staticmethod
     def is_solvable(position):
-        #if frozenset(position._boxes) in Position.solvable:
-        #    return Position.solvable[frozenset(position._boxes)]
-        #boxes = position._boxes - position._goals  # get only boxes which are not on goals already
         boxes = { position._last_moved_box } - position._goals  # consider only last moved box
         if position._last_moved_box not in position._goals:
             last_moved_box_y, last_moved_box_x = position._last_moved_box
@@ -419,75 +304,45 @@ class Position():
                 for box_dy, box_dx in boxes:
                     c += (last_moved_box_y + box_dy, last_moved_box_x + box_dx) in position._boxes
                 if c == total:
-                    #Position.solvable[frozenset(position._boxes)] = False
                     return False
         return True
 
     @staticmethod
-    def solve(position, debug=True, check_reduced=True):
-        def priority_(position):
-            return len(position._boxes.keys() - position._goals)
-        #def priority(position):
-        #    return sum([_col for _row in position._player_board for _col in _row])# + len(position._boxes - position._goals)
-        def priority_(position):
-            return -time.time_ns()
-        def priority_(position):
-            return -counter
-        def priority(position):
-            #return (counter, len(position._boxes - position._goals))
-            return (len(position._boxes.keys() - position._goals), -counter)
-        def priority(position):
-            import statistics
+    def solve(position, check_reduced=True, priority_func=None, limit_positions_explored=0):
+        def priority(position, counter):
             if len(position._boxes) <= 2:
                 return counter
-            #stddev = statistics.stdev(position._boxes.values()) ** 2
             num_dead_boxes = sum(num_moves == 0 for num_moves, orig_pos in position._boxes.values())
-            num_perfect_pushed_boxes = len(position._perfect_goals.intersection(position._boxes.keys()))
             num_pushed_boxes = len(position._goals.intersection(position._boxes.keys()))
-            #return (-num_dead_boxes, -num_perfect_pushed_boxes, -counter)#-num_pushed_boxes, -counter)
-            return (-num_dead_boxes, -num_pushed_boxes, -counter)  # -num_pushed_boxes, -counter)
-            #max_moves = max(position._boxes.values())
-            #min_moves = min(position._boxes.values())
-            #return (-num_dead_boxes, len(position._boxes.keys() - position._goals), -counter)
-            #v = sum(num_moves == 0 for num_moves in position._boxes.values())
-            #return (-round(stddev,1), len(position._boxes.keys() - position._goals), +counter)
-            #return -counter
+            return (-num_dead_boxes, -num_pushed_boxes, -counter)
 
+        if priority_func is not None:
+            priority = priority_func
         states = [(0, position)]
-        seen_states = set()
+        seen_positions = set()
         reduced_positions = set()
         counter = 0
         while states:
-            Position.position_viewed += 1
+            counter += 1
+            Position.positions_explored += 1
+            if limit_positions_explored:
+                if Position.positions_explored > limit_positions_explored:
+                    return False, None
             time_end = time.time()
-            performance = Position.position_viewed / (time_end - Position.time_start + 1)
-            if Position.position_viewed % 10000 == 0:
-                print(f'performance: {performance} positions per second')
+            Position.positions_per_sec = Position.positions_explored / (time_end - Position.time_start + 1)
             metric, position = heapq.heappop(states)
-            if position in Position.solved_positions:
+            if position in Position.solved_positions: # TODO: remove, this is only for 2box_deads
                 return True, None
-            if debug and counter % 10000 == 0:
-                print('metric: ', metric)
-                print('number of cached positions: ', len(seen_states))
-                print('number of positions in queue: ', len(states))
-                print('positions viewed: ', Position.position_viewed, ', filtered', Position.position_filtered, 100 * Position.position_filtered/(Position.position_viewed+Position.position_filtered))
-                print('positions filtered due to 2box: ', Position.position_2box_filtered, 100 * Position.position_2box_filtered/(Position.position_viewed+Position.position_2box_filtered))
-                print(position, sum(map(lambda x: x[0], position._boxes.values())))
-                pass
             if Position.is_solved(position):
-                #print('Solved!!!')
-                if debug:
-                    print(position)
                 return True, position
             if check_reduced and Position.is_reduced(position):
-                if debug:
-                    print('Reduced!!!')
-                    print(position)
+                #print('Reduced!!!')
+                #print(position)
                 if position not in reduced_positions:
                     reduced_positions.add(position)
-                    print('Number of reduced positions: ', len(reduced_positions))
+                    #print('Number of reduced positions: ', len(reduced_positions))
                     states.clear()
-                    seen_states.clear()
+                    seen_positions.clear()
             for box_y, box_x, direction in Position.get_pushable_boxes(position):
                 counter += 1
                 dy, dx = {'u': (-1, 0), 'd': (1, 0), 'l': (0, -1), 'r': (0, 1)}[direction]
@@ -505,27 +360,28 @@ class Position():
                                     Position.position_2box_filtered += 1
                                     break
                             except:
+                                print('exception')
                                 print(position, direction, box_y, box_x, player_pos)
                                 pass
                 if two_box_unsolvable:
                     continue
+
                 new_position = Position.copy(position)
                 new_position.push_box(box_y, box_x, direction)
-                #if sum(new_position._boxes.values()) > 400:
-                #    Position.position_filtered += 1
-                #    continue
-                #is_push_box_revertable = False
-                #dy, dx = {'u': (-1, 0), 'd': (1, 0), 'l': (0, -1), 'r': (0, 1)}[direction]
-                #revert_direction = {'u':'d', 'd':'u', 'l':'r', 'r':'l'}[direction]
-                #if (box_y+dy, box_x+dx, revert_direction) in Position.get_pushable_boxes(new_position):
-                #    is_push_box_revertable = True
-                if new_position not in seen_states:
-                    seen_states.add(new_position)
-                    #if is_push_box_revertable or new_position._ignore_position_check or Position.is_solvable(new_position):
-                    #if is_push_box_revertable or Position.is_solvable(new_position):
+                if new_position not in seen_positions:
+                    seen_positions.add(new_position)
                     if Position.is_solvable(new_position):
-                        heapq.heappush(states, (priority(new_position), new_position))
-            counter += 1
+                        heapq.heappush(states, (priority(new_position, counter), new_position))
+
+            if 0 and Position.positions_explored % 10000 == 0 and len(position._boxes) == len(position._goals):
+                print(f'Performance: {Position.positions_per_sec} positions per second')
+                print('metric: ', metric)
+                print('number of cached positions: ', len(seen_positions))
+                print('number of positions in queue: ', len(states))
+                print('positions viewed: ', Position.positions_explored)
+                print('positions filtered due to 2box: ', Position.position_2box_filtered, 100 * Position.position_2box_filtered/(Position.positions_explored+Position.position_2box_filtered))
+                print('number of box pushed: ', sum(map(lambda x: x[0], position._boxes.values())))
+                print(position)
         return False, None
 
     def __str__(self):
@@ -558,29 +414,57 @@ class Position():
 
 Position.precalc_dead_masks()
 
-level = get_level(9)
-
+level = get_level(4)
 position = Position(level)
-#position.set_boxes({(2,3), (3,2)})
-print(position)
-#print(list(Position.get_pushable_boxes(position)))
 
-#a = list(Position.get_pushable_boxes(position))[0]
-#position.make_move(*a)
-#position.display()
+#is_solved, solved_position = Position.solve(position)
+#print('Positions viewed: ', Position.positions_explored)
+#if is_solved:
+#    print(solved_position._move_history)
 
-res, position = Position.solve(position)
-#print(Position.is_solvable(position))
+def priority_func(position, counter, order, signs):
+    if len(position._boxes) <= 2:
+        return counter
+    num_dead_boxes = sum(num_moves == 0 for num_moves, orig_pos in position._boxes.values())
+    num_pushed_boxes = len(position._goals.intersection(position._boxes.keys()))
+    res = [num_dead_boxes, num_pushed_boxes, counter]
+    for idx, sign in enumerate(signs):
+        res[idx] *= sign
+    res = [res[i] for i in order]
+    return tuple(res)
 
 
-#print(list(get_available_moves(data, boxes, player)))
 
-#for move in get_available_moves(data, boxes, player):
-#    print(move)
-#    new_boxes, new_player = make_move(move, boxes)
-#    display(data, new_boxes, goals, new_player)
-#print(is_solved(boxes, goals))
-print('Positions viewed: ', Position.position_viewed)
+metrics = ('num_dead_boxes', 'num_pushed_boxes', 'counter')
+orders = list(itertools.permutations([0,1,2], 3))
+signs = list(itertools.product([-1,1], repeat=3))
+signs = ((-1,-1,-1), (-1,-1,1))
 
-print(len(position._move_history))
-print(position._move_history)
+min_duration = 1000000
+min_positions_explored = 100000000
+win_strategy = None
+results = []
+for order in orders:
+    for sign in signs:
+        Position.positions_explored = 0
+        strategy =','.join((['','','-'][sign[i]] + metrics[i]) for i in order)
+        time_start = time.time()
+        is_solved, solved_position = Position.solve(position, priority_func=functools.partial(priority_func, order=order, signs=sign), limit_positions_explored=min_positions_explored*2)
+        duration = time.time() - time_start
+        print(strategy)
+        print('Positions viewed: ', Position.positions_explored)
+        print('Time: ', duration)
+        min_positions_explored = min(min_positions_explored, Position.positions_explored)
+        metric = (Position.positions_explored, duration, strategy)
+        results.append(metric)
+
+print('Sorted by exploration:')
+for value in sorted(results):
+    print(value)
+print('Sorted by timings:')
+for value in sorted(results, key=lambda x: x[1]):
+    print(value)
+
+#print('Winning strategy: ', win_strategy)
+#print('Best time: ', min_duration)
+#print('Best exploration: ', min_positions_explored)
